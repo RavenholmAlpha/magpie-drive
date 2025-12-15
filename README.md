@@ -98,8 +98,9 @@ Feel free to submit Issues and PRs, but don't expect me to look at them (just ki
 
 ---
 
-**Finally**: This project is just a toy, don't take it too seriously. If you like it, give it a Star; if you hate it, don't骂 me (curse me), I'm just a coder.🐦
+**Finally**: This project is just a toy, don't take it too seriously. If you like it, give it a Star; if you hate it, don't骂 me (curse me), I'm just a magpie.🐦
 
 ---
+
 
 [中文版本 (Chinese Version)](README.zh.md)
