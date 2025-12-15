@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SECURE LOGIN - Magpie Drive</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="login-page">
+    <div class="login-card">
+        <div class="logo" style="justify-content: center; margin-bottom: 20px;">
+            <i class="fas fa-crow"></i> MAGPIE_TERMINAL
+        </div>
+        <h2>AUTHENTICATION</h2>
+        <form id="loginForm">
+            <div class="form-group">
+                <label>USER_ID</label>
+                <div class="input-icon">
+                    <i class="fas fa-user"></i>
+                    <input type="text" id="username" placeholder="INPUT ID" required autocomplete="off">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>ACCESS_KEY</label>
+                <div class="input-icon">
+                    <i class="fas fa-key"></i>
+                    <input type="password" id="password" placeholder="INPUT KEY" required>
+                </div>
+            </div>
+            <div class="error-msg" id="errorMsg"></div>
+            <button type="submit" class="upload-btn" style="width: 100%; justify-content: center; margin-top: 20px;">
+                INITIALIZE SESSION
+            </button>
+            <div class="hint">
+                <p>> DEFAULT_CREDS:</p>
+                <p>> Welcome to magpie drive</p>
+                <p>> Hi,I am raven</p>
+            </div>
+        </form>
+    </div>
+
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const errorMsg = document.getElementById('errorMsg');
+            
+            errorMsg.innerText = 'HANDSHAKING...';
+
+            try {
+                const response = await fetch('/api/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+
+                const data = await response.json();
+
+                if (response.ok && data.success) {
+                    localStorage.setItem('auth_token', data.token);
+                    errorMsg.style.color = 'var(--terminal-green)';
+                    errorMsg.innerText = 'ACCESS GRANTED';
+                    setTimeout(() => window.location.href = '/', 500);
+                } else {
+                    errorMsg.style.color = 'var(--alert-red)';
+                    errorMsg.innerText = 'ACCESS DENIED: ' + (data.error || 'UNKNOWN');
+                }
+            } catch (err) {
+                console.error(err);
+                errorMsg.innerText = 'CONNECTION ERROR';
+            }
+        });
+    </script>
+</body>
+</html>
