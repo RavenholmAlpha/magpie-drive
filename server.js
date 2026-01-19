@@ -4,7 +4,7 @@ const path = require('path');
 const url = require('url');
 const crypto = require('crypto');
 
-const port = process.argv[2] || 8000;
+const port = process.argv[2] || 80;
 
 // --- Configuration ---
 const BASE_DIR = process.cwd();
@@ -55,7 +55,7 @@ const server = http.createServer(async function (request, response) {
 
   // CORS，i don't like cors,应该送去地狱nmd
   //  构思CORS，但TM又不得不加
-  // 直接开了所有源，爱咋咋地，出了问题再说
+  
   response.setHeader('Access-Control-Allow-Origin', '*');
   response.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
@@ -495,18 +495,34 @@ function serveAppFile(filename, response) { serveFileContent(path.join(process.c
 function serveFileContent(filePath, response, forceDownload = false) {
     const extname = String(path.extname(filePath)).toLowerCase();
     const contentType = mimeTypes[extname] || 'application/octet-stream';
-    fs.readFile(filePath, (error, content) => {
-        if (error) { 
-            response.writeHead(404); 
-            response.end('Not Found'); 
-        } else { 
-            const headers = { 'Content-Type': contentType };
-            if (forceDownload) {
-                headers['Content-Disposition'] = 'attachment';
-            }
-            response.writeHead(200, headers); 
-            response.end(content, 'utf-8'); 
+    
+    fs.stat(filePath, (error, stat) => {
+        if (error || !stat.isFile()) {
+            response.writeHead(404);
+            response.end('Not Found');
+            return;
         }
+
+        const headers = { 'Content-Type': contentType };
+        if (forceDownload) {
+            const fileName = path.basename(filePath);
+            const encodedName = encodeURIComponent(fileName);
+            headers['Content-Disposition'] = `attachment; filename="${encodedName}"`;
+        }
+        headers['Content-Length'] = stat.size;
+        response.writeHead(200, headers);
+
+        const readStream = fs.createReadStream(filePath);
+        readStream.on('error', (err) => {
+            console.error('Stream error:', err);
+            if (!response.headersSent) {
+                response.writeHead(500);
+                response.end('Read Error');
+            } else {
+                response.destroy();
+            }
+        });
+        readStream.pipe(response);
     });
 }
 
