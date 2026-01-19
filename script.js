@@ -31,6 +31,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     const selectAllCheckbox = document.getElementById('selectAll');
     const dragOverlay = document.getElementById('dragOverlay');
 
+    // Viewer Elements
+    const viewerOverlay = document.getElementById('viewerOverlay');
+    const viewerBody = document.getElementById('viewerBody');
+    const viewerFilename = document.getElementById('viewerFilename');
+    const viewerDownloadBtn = document.getElementById('viewerDownloadBtn');
+    const viewerCloseBtn = document.getElementById('viewerCloseBtn');
+
     // Modal Elements
     const modalOverlay = document.getElementById('modalOverlay');
     const modalTitle = document.getElementById('modalTitle');
@@ -147,6 +154,13 @@ document.addEventListener('DOMContentLoaded', async () => {
             }
         }
     });
+
+    if (viewerCloseBtn) viewerCloseBtn.addEventListener('click', closeViewer);
+    if (viewerOverlay) {
+        viewerOverlay.addEventListener('click', (e) => {
+            if (e.target === viewerOverlay) closeViewer();
+        });
+    }
 
     // --- Modal System Functions --- 
     // 修复过的屎山
@@ -300,6 +314,9 @@ document.addEventListener('DOMContentLoaded', async () => {
 
             let actionsHtml = '';
             if (!file.isDirectory) {
+                if (getPreviewType(file.name)) {
+                    actionsHtml += `<button class="action-btn-icon preview" title="Preview"><i class="fas fa-eye"></i></button>`;
+                }
                 actionsHtml += `<button class="action-btn-icon copy-link" title="Copy Direct Link"><i class="fas fa-link"></i></button>`;
                 actionsHtml += `<button class="action-btn-icon download" title="Download"><i class="fas fa-download"></i></button>`;
             }
@@ -334,9 +351,12 @@ document.addEventListener('DOMContentLoaded', async () => {
                     const nextPath = file.path ? file.path : (currentPath === '/' ? file.name : `${currentPath}/${file.name}`);
                     loadFiles(nextPath);
                 } else {
-                    downloadFile(file.name, file.path);
+                    openFileViewer(file.name, file.path);
                 }
             });
+
+            const previewBtn = item.querySelector('.preview');
+            if (previewBtn) previewBtn.addEventListener('click', (e) => { e.stopPropagation(); openFileViewer(file.name, file.path); });
 
             const downloadBtn = item.querySelector('.download');
             if (downloadBtn) downloadBtn.addEventListener('click', (e) => { e.stopPropagation(); downloadFile(file.name, file.path); });
@@ -388,6 +408,25 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (selectAllCheckbox) {
             selectAllCheckbox.checked = currentFiles.length > 0 && selectedFiles.size === currentFiles.length;
         }
+    }
+
+    function resolveFilePath(filename, fullPath = null) {
+        return fullPath ? fullPath : (currentPath === '/' ? filename : `${currentPath}/${filename}`);
+    }
+
+    function buildFileUrl(filePath) {
+        return `/${encodeURIComponent(filePath.replace(/^\//, ''))}?token=${encodeURIComponent(authToken)}`;
+    }
+
+    function getPreviewType(filename) {
+        const ext = filename.split('.').pop().toLowerCase();
+        const imageTypes = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg']);
+        const videoTypes = new Set(['mp4', 'webm', 'ogg', 'mov', 'm4v']);
+        const audioTypes = new Set(['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a']);
+        if (imageTypes.has(ext)) return 'image';
+        if (videoTypes.has(ext)) return 'video';
+        if (audioTypes.has(ext)) return 'audio';
+        return null;
     }
 
     // --- Action Functions ---
@@ -535,9 +574,52 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
 
     function downloadFile(filename, fullPath = null) {
-        const filePath = fullPath ? fullPath : (currentPath === '/' ? filename : `${currentPath}/${filename}`);
-        const url = `/${encodeURIComponent(filePath.replace(/^\//, ''))}?token=${encodeURIComponent(authToken)}`;
+        const filePath = resolveFilePath(filename, fullPath);
+        const url = buildFileUrl(filePath);
         window.open(url, '_blank');
+    }
+
+    function openFileViewer(filename, fullPath = null) {
+        const previewType = getPreviewType(filename);
+        if (!previewType) {
+            downloadFile(filename, fullPath);
+            return;
+        }
+
+        const filePath = resolveFilePath(filename, fullPath);
+        const url = buildFileUrl(filePath);
+        viewerFilename.innerText = filename;
+        viewerBody.innerHTML = '';
+
+        let previewEl = null;
+        if (previewType === 'image') {
+            previewEl = document.createElement('img');
+            previewEl.className = 'viewer-content-img';
+            previewEl.src = url;
+            previewEl.alt = filename;
+        } else if (previewType === 'video') {
+            previewEl = document.createElement('video');
+            previewEl.className = 'viewer-content-video';
+            previewEl.src = url;
+            previewEl.controls = true;
+        } else if (previewType === 'audio') {
+            previewEl = document.createElement('audio');
+            previewEl.className = 'viewer-content-audio';
+            previewEl.src = url;
+            previewEl.controls = true;
+        }
+
+        if (previewEl) {
+            viewerBody.appendChild(previewEl);
+        }
+
+        viewerDownloadBtn.onclick = () => downloadFile(filename, fullPath);
+        viewerOverlay.classList.remove('hidden');
+    }
+
+    function closeViewer() {
+        viewerOverlay.classList.add('hidden');
+        viewerBody.innerHTML = '';
     }
 
     function updateBreadcrumb(path) {
