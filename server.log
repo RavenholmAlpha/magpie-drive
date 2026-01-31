@@ -1,0 +1,23 @@
+Magpie Drive (Features) running at http://127.0.0.1:8080/
+Files Dir: /app/files
+Secret Dir: /app/secret
+Users: admin/admin, guest/guest
+GET /login.html
+GET /style.css
+POST /api/login
+GET /
+GET /style.css
+GET /script.js
+GET /api/me
+GET /api/list
+GET /login.html
+GET /style.css
+POST /api/login
+GET /
+GET /style.css
+GET /script.js
+GET /api/me
+GET /api/list
+GET /api/list
+GET /files%2Ftest.txt
+GET /api/search

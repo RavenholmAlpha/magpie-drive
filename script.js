@@ -6,6 +6,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     let authToken = localStorage.getItem('auth_token');
     let selectedFiles = new Set();
     let currentFiles = [];
+    let searchTimeout = null;
 
     // DOM Elements
     const fileListEl = document.getElementById('fileList');
@@ -87,11 +88,18 @@ document.addEventListener('DOMContentLoaded', async () => {
     // Search Listeners
     if (searchBtn) searchBtn.addEventListener('click', performSearch);
     if (searchInput) {
-        searchInput.addEventListener('keyup', (e) => {
-            if (e.key === 'Enter') performSearch();
+        searchInput.addEventListener('input', () => {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(performSearch, 500);
+        });
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                clearTimeout(searchTimeout);
+                performSearch();
+            }
             if (e.key === 'Escape') {
                 searchInput.value = '';
-                renderFiles(currentFiles);
+                loadFiles(currentPath);
             }
         });
     }
@@ -161,6 +169,19 @@ document.addEventListener('DOMContentLoaded', async () => {
             if (e.target === viewerOverlay) closeViewer();
         });
     }
+
+    // Context Menu Listener
+    document.addEventListener('contextmenu', (e) => {
+        const fileItem = e.target.closest('.file-item');
+        if (fileItem) {
+            e.preventDefault();
+            const filename = fileItem.dataset.name;
+            showContextMenu(e.pageX, e.pageY, filename);
+        } else {
+            hideContextMenu();
+        }
+    });
+    document.addEventListener('click', hideContextMenu);
 
     // --- Modal System Functions --- 
     // 修复过的屎山
@@ -326,6 +347,9 @@ document.addEventListener('DOMContentLoaded', async () => {
                 ? `${file.name} <span class="file-path-hint">${parentDir || '/'}</span>` 
                 : file.name;
 
+            // Mobile Kebab
+            const kebabHtml = `<button class="mobile-action-btn"><i class="fas fa-ellipsis-v"></i></button>`;
+
             item.innerHTML = `
                 <div class="col-select">${checkboxHtml}</div>
                 <div class="col-icon"><i class="fas ${iconClass}"></i></div>
@@ -333,7 +357,17 @@ document.addEventListener('DOMContentLoaded', async () => {
                 <div class="col-size">${sizeText}</div>
                 <div class="col-date">${dateText}</div>
                 <div class="col-actions">${actionsHtml}</div>
+                <div class="col-kebab">${kebabHtml}</div>
             `;
+
+            const kebabBtn = item.querySelector('.mobile-action-btn');
+            if (kebabBtn) {
+                kebabBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const rect = kebabBtn.getBoundingClientRect();
+                    showContextMenu(rect.left - 150, rect.bottom, file.name);
+                });
+            }
 
             item.addEventListener('click', (e) => {
                 if (e.target.closest('.action-btn-icon') || e.target.closest('.file-checkbox')) return;
@@ -423,9 +457,11 @@ document.addEventListener('DOMContentLoaded', async () => {
         const imageTypes = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg']);
         const videoTypes = new Set(['mp4', 'webm', 'ogg', 'mov', 'm4v']);
         const audioTypes = new Set(['mp3', 'wav', 'ogg', 'flac', 'aac', 'm4a']);
+        const textTypes = new Set(['txt', 'md', 'js', 'css', 'html', 'json', 'xml', 'log', 'sh', 'bat', 'yml', 'yaml', 'ini']);
         if (imageTypes.has(ext)) return 'image';
         if (videoTypes.has(ext)) return 'video';
         if (audioTypes.has(ext)) return 'audio';
+        if (textTypes.has(ext)) return 'text';
         return null;
     }
 
@@ -442,7 +478,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         try {
             if (navigator.clipboard && navigator.clipboard.writeText) {
                 await navigator.clipboard.writeText(url);
-                await showAlert('LINK COPIED TO CLIPBOARD');
+                showToast('LINK COPIED TO CLIPBOARD');
             } else {
                 throw new Error('Clipboard API unavailable');
             }
@@ -459,7 +495,7 @@ document.addEventListener('DOMContentLoaded', async () => {
                 const successful = document.execCommand('copy');
                 document.body.removeChild(textArea);
                 if (successful) {
-                    await showAlert('LINK COPIED TO CLIPBOARD');
+                    showToast('LINK COPIED TO CLIPBOARD');
                 } else {
                     throw new Error('execCommand failed');
                 }
@@ -579,7 +615,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         window.open(url, '_blank');
     }
 
-    function openFileViewer(filename, fullPath = null) {
+    async function openFileViewer(filename, fullPath = null) {
         const previewType = getPreviewType(filename);
         if (!previewType) {
             downloadFile(filename, fullPath);
@@ -587,34 +623,50 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
 
         const filePath = resolveFilePath(filename, fullPath);
-        const url = buildFileUrl(filePath);
+        const url = buildFileUrl(filePath) + '&preview=true';
         viewerFilename.innerText = filename;
-        viewerBody.innerHTML = '';
+        viewerBody.innerHTML = '<div class="loading">LOADING CONTENT...</div>';
+        viewerOverlay.classList.remove('hidden');
 
-        let previewEl = null;
-        if (previewType === 'image') {
-            previewEl = document.createElement('img');
-            previewEl.className = 'viewer-content-img';
-            previewEl.src = url;
-            previewEl.alt = filename;
-        } else if (previewType === 'video') {
-            previewEl = document.createElement('video');
-            previewEl.className = 'viewer-content-video';
-            previewEl.src = url;
-            previewEl.controls = true;
-        } else if (previewType === 'audio') {
-            previewEl = document.createElement('audio');
-            previewEl.className = 'viewer-content-audio';
-            previewEl.src = url;
-            previewEl.controls = true;
-        }
+        try {
+            if (previewType === 'text') {
+                 const res = await fetch(url);
+                 if (!res.ok) throw new Error('Failed to load text');
+                 const text = await res.text();
+                 const pre = document.createElement('pre');
+                 pre.className = 'viewer-content-text';
+                 pre.textContent = text;
+                 viewerBody.innerHTML = '';
+                 viewerBody.appendChild(pre);
+            } else {
+                viewerBody.innerHTML = '';
+                let previewEl = null;
+                if (previewType === 'image') {
+                    previewEl = document.createElement('img');
+                    previewEl.className = 'viewer-content-img';
+                    previewEl.src = url;
+                    previewEl.alt = filename;
+                } else if (previewType === 'video') {
+                    previewEl = document.createElement('video');
+                    previewEl.className = 'viewer-content-video';
+                    previewEl.src = url;
+                    previewEl.controls = true;
+                } else if (previewType === 'audio') {
+                    previewEl = document.createElement('audio');
+                    previewEl.className = 'viewer-content-audio';
+                    previewEl.src = url;
+                    previewEl.controls = true;
+                }
 
-        if (previewEl) {
-            viewerBody.appendChild(previewEl);
+                if (previewEl) {
+                    viewerBody.appendChild(previewEl);
+                }
+            }
+        } catch (e) {
+            viewerBody.innerHTML = `<div style="color:var(--alert-red)">ERROR: ${e.message}</div>`;
         }
 
         viewerDownloadBtn.onclick = () => downloadFile(filename, fullPath);
-        viewerOverlay.classList.remove('hidden');
     }
 
     function closeViewer() {
@@ -747,5 +799,82 @@ document.addEventListener('DOMContentLoaded', async () => {
             'mp4': 'fa-file-video', 'mp3': 'fa-file-audio', 'txt': 'fa-file-alt'
         };
         return icons[ext] || 'fa-file';
+    }
+
+    // --- New HCI Functions ---
+
+    function showToast(message, type = 'success') {
+        const container = document.getElementById('toastContainer') || createToastContainer();
+        const toast = document.createElement('div');
+        toast.className = `toast ${type}`;
+        toast.innerHTML = `<i class="fas ${type === 'success' ? 'fa-check-circle' : 'fa-exclamation-circle'}"></i> ${message}`;
+        container.appendChild(toast);
+        setTimeout(() => {
+            toast.style.animation = 'fadeOut 0.3s ease-out forwards';
+            setTimeout(() => toast.remove(), 300);
+        }, 3000);
+    }
+
+    function createToastContainer() {
+        const div = document.createElement('div');
+        div.id = 'toastContainer';
+        div.className = 'toast-container';
+        document.body.appendChild(div);
+        return div;
+    }
+
+    function showContextMenu(x, y, filename) {
+        hideContextMenu();
+        const menu = document.createElement('div');
+        menu.className = 'context-menu';
+
+        // Prevent menu from going off-screen
+        const winWidth = window.innerWidth;
+        const winHeight = window.innerHeight;
+
+        const file = currentFiles.find(f => f.name === filename);
+        if (!file) return;
+
+        const actions = [
+            { icon: 'fa-eye', label: 'OPEN / PREVIEW', action: () => file.isDirectory ? loadFiles(file.path || (currentPath === '/' ? file.name : `${currentPath}/${file.name}`)) : openFileViewer(file.name, file.path) },
+            { icon: 'fa-download', label: 'DOWNLOAD', action: () => downloadFile(file.name, file.path), condition: !file.isDirectory },
+            { icon: 'fa-link', label: 'COPY LINK', action: () => copyDirectLink(file.name, file.path), condition: !file.isDirectory },
+            { separator: true },
+            { icon: 'fa-trash', label: 'DELETE', action: () => { selectedFiles.add(file.name); deleteSelectedFiles(); }, danger: true }
+        ];
+
+        actions.forEach(item => {
+            if (item.condition === false) return;
+            if (item.separator) {
+                const sep = document.createElement('div');
+                sep.className = 'context-menu-separator';
+                menu.appendChild(sep);
+                return;
+            }
+            const el = document.createElement('div');
+            el.className = 'context-menu-item';
+            if (item.danger) el.style.color = 'var(--alert-red)';
+            el.innerHTML = `<i class="fas ${item.icon}"></i> ${item.label}`;
+            el.onclick = item.action;
+            menu.appendChild(el);
+        });
+
+        document.body.appendChild(menu);
+
+        // Adjust position after append to get dimensions
+        const rect = menu.getBoundingClientRect();
+        let posX = x;
+        let posY = y;
+
+        if (posX + rect.width > winWidth) posX = winWidth - rect.width - 10;
+        if (posY + rect.height > winHeight) posY = winHeight - rect.height - 10;
+
+        menu.style.top = posY + 'px';
+        menu.style.left = posX + 'px';
+    }
+
+    function hideContextMenu() {
+        const existing = document.querySelector('.context-menu');
+        if (existing) existing.remove();
     }
 });

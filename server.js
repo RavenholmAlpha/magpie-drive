@@ -162,6 +162,7 @@ const server = http.createServer(async function (request, response) {
   // Note: pathname starts with /, e.g., /files/foo.txt
   // resolveVirtualPath expects "files/foo.txt"
   const token = parsedUrl.query.token;
+  const isPreview = parsedUrl.query.preview === 'true';
   const user = validateToken(token); // Get user from token
   
   if (user) {
@@ -174,7 +175,7 @@ const server = http.createServer(async function (request, response) {
                 return;
             }
             if (stat.isFile()) {
-                serveFileContent(resolved.path, response, true);
+                serveFileContent(resolved.path, response, !isPreview);
             } else {
                 response.writeHead(302, { 'Location': '/' });
                 response.end();
