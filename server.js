@@ -146,6 +146,14 @@ const server = http.createServer(async function (request, response) {
           handleApiMove(user, request, response);
           return;
       }
+      if (pathname === '/api/save') {
+          handleApiSave(user, request, response);
+          return;
+      }
+      if (pathname === '/api/rename') {
+          handleApiRename(user, request, response);
+          return;
+      }
   }
 
   // File Download
@@ -480,6 +488,80 @@ function handleApiMove(user, request, response) {
             
             response.writeHead(200, { 'Content-Type': 'application/json' });
             response.end(JSON.stringify({ success: true, errors }));
+        } catch (e) {
+            response.writeHead(400);
+            response.end(JSON.stringify({ error: 'Bad Request' }));
+        }
+    });
+}
+
+function handleApiSave(user, request, response) {
+    let body = '';
+    request.on('data', chunk => body += chunk);
+    request.on('end', () => {
+        try {
+            const { path: filePath, content } = JSON.parse(body);
+
+            const resolved = resolveVirtualPath(user, filePath);
+            if (resolved.error) return send403(response);
+            if (resolved.type === 'virtual_root') return send403(response);
+
+            if (!fs.existsSync(resolved.path)) {
+                // Should we allow creating new files? For now, assume editing existing.
+                // But actually, saving might create. Let's allow simple write.
+            }
+
+            fs.writeFile(resolved.path, content, (err) => {
+                if (err) {
+                    response.writeHead(500);
+                    response.end(JSON.stringify({ error: 'Save failed' }));
+                } else {
+                    response.writeHead(200, { 'Content-Type': 'application/json' });
+                    response.end(JSON.stringify({ success: true }));
+                }
+            });
+        } catch (e) {
+            response.writeHead(400);
+            response.end(JSON.stringify({ error: 'Bad Request' }));
+        }
+    });
+}
+
+function handleApiRename(user, request, response) {
+    let body = '';
+    request.on('data', chunk => body += chunk);
+    request.on('end', () => {
+        try {
+            const { oldPath, newPath } = JSON.parse(body);
+
+            const resOld = resolveVirtualPath(user, oldPath);
+            const resNew = resolveVirtualPath(user, newPath);
+
+            if (resOld.error || resOld.type === 'virtual_root' || resNew.error || resNew.type === 'virtual_root') {
+                return send403(response);
+            }
+
+            if (!fs.existsSync(resOld.path)) {
+                response.writeHead(404);
+                response.end(JSON.stringify({ error: 'Old path not found' }));
+                return;
+            }
+
+            if (fs.existsSync(resNew.path)) {
+                response.writeHead(409);
+                response.end(JSON.stringify({ error: 'New path already exists' }));
+                return;
+            }
+
+            fs.rename(resOld.path, resNew.path, (err) => {
+                if (err) {
+                    response.writeHead(500);
+                    response.end(JSON.stringify({ error: 'Rename failed' }));
+                } else {
+                    response.writeHead(200, { 'Content-Type': 'application/json' });
+                    response.end(JSON.stringify({ success: true }));
+                }
+            });
         } catch (e) {
             response.writeHead(400);
             response.end(JSON.stringify({ error: 'Bad Request' }));

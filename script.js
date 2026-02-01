@@ -7,6 +7,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     let selectedFiles = new Set();
     let currentFiles = [];
     let searchTimeout = null;
+    let sortState = { key: 'name', order: 'asc' }; // 'asc' or 'desc'
 
     // DOM Elements
     const fileListEl = document.getElementById('fileList');
@@ -73,6 +74,21 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     // --- Initial Load ---
     loadFiles(currentPath);
+
+    // --- Header Sorting ---
+    const headers = document.querySelectorAll('.file-list-header > div');
+    headers.forEach(header => {
+        if (header.classList.contains('col-name')) {
+            header.style.cursor = 'pointer';
+            header.onclick = () => sortFiles('name');
+        } else if (header.classList.contains('col-size')) {
+            header.style.cursor = 'pointer';
+            header.onclick = () => sortFiles('size');
+        } else if (header.classList.contains('col-date')) {
+            header.style.cursor = 'pointer';
+            header.onclick = () => sortFiles('mtime');
+        }
+    });
 
     // --- Event Listeners ---
     if (uploadBtn) uploadBtn.addEventListener('click', () => fileInput.click());
@@ -307,14 +323,47 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
 
+    function sortFiles(key) {
+        if (sortState.key === key) {
+            sortState.order = sortState.order === 'asc' ? 'desc' : 'asc';
+        } else {
+            sortState.key = key;
+            sortState.order = 'asc';
+        }
+        renderFiles(currentFiles);
+    }
+
     function renderFiles(files) {
         fileListEl.innerHTML = '';
         
         files.sort((a, b) => {
-            // 文件夹优先，然后按名字排序
-            // 写了三次才对，我是傻逼
-            if (a.isDirectory === b.isDirectory) return a.name.localeCompare(b.name);
-            return a.isDirectory ? -1 : 1;
+            // Always directories first
+            if (a.isDirectory !== b.isDirectory) {
+                return a.isDirectory ? -1 : 1;
+            }
+
+            let valA = a[sortState.key];
+            let valB = b[sortState.key];
+
+            if (typeof valA === 'string') {
+                valA = valA.toLowerCase();
+                valB = valB.toLowerCase();
+            }
+
+            if (valA < valB) return sortState.order === 'asc' ? -1 : 1;
+            if (valA > valB) return sortState.order === 'asc' ? 1 : -1;
+            return 0;
+        });
+
+        // Update sorting indicators
+        document.querySelectorAll('.file-list-header > div').forEach(h => {
+             h.innerHTML = h.innerHTML.replace(/ <i class="fas fa-caret-.*"><\/i>/, '');
+             if ((h.classList.contains('col-name') && sortState.key === 'name') ||
+                 (h.classList.contains('col-size') && sortState.key === 'size') ||
+                 (h.classList.contains('col-date') && sortState.key === 'mtime')) {
+                     const icon = sortState.order === 'asc' ? 'down' : 'up';
+                     h.innerHTML += ` <i class="fas fa-caret-${icon}"></i>`;
+             }
         });
 
         if (files.length === 0) {
@@ -573,6 +622,30 @@ document.addEventListener('DOMContentLoaded', async () => {
         } catch (e) { await showAlert('CONNECTION FAILURE'); }
     }
 
+    async function renameFile(filename) {
+        const newName = await showPrompt("INPUT NEW NAME:", filename);
+        if (!newName || newName === filename) return;
+
+        const oldPath = currentPath === '/' ? filename : `${currentPath}/${filename}`;
+        const newPath = currentPath === '/' ? newName : `${currentPath}/${newName}`;
+
+        try {
+             const res = await fetchWithAuth('/api/rename', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ oldPath, newPath })
+            });
+            if (res.ok) {
+                showToast('RENAME SUCCESSFUL');
+                loadFiles(currentPath);
+            } else {
+                showToast('RENAME FAILED: ' + (await res.json()).error, 'error');
+            }
+        } catch (e) {
+            showToast('CONNECTION ERROR', 'error');
+        }
+    }
+
     async function deleteSelectedFiles() {
         if (selectedFiles.size === 0) return await showAlert('NO FILES SELECTED');
         const confirmed = await showConfirm(`CONFIRM DELETION OF ${selectedFiles.size} ITEMS?`);
@@ -628,18 +701,58 @@ document.addEventListener('DOMContentLoaded', async () => {
         viewerBody.innerHTML = '<div class="loading">LOADING CONTENT...</div>';
         viewerOverlay.classList.remove('hidden');
 
+        // Remove existing save btn if any
+        const existingSaveBtn = document.getElementById('viewerSaveBtn');
+        if (existingSaveBtn) existingSaveBtn.remove();
+
         try {
             if (previewType === 'text') {
                  const res = await fetch(url);
                  if (!res.ok) throw new Error('Failed to load text');
                  const text = await res.text();
-                 const pre = document.createElement('pre');
-                 pre.className = 'viewer-content-text';
-                 pre.textContent = text;
+
+                 const textarea = document.createElement('textarea');
+                 textarea.className = 'viewer-editor';
+                 textarea.value = text;
+                 textarea.spellcheck = false;
+
                  viewerBody.innerHTML = '';
-                 viewerBody.appendChild(pre);
+                 viewerBody.appendChild(textarea);
+
+                 if (userRole === 'admin') {
+                     const footer = document.querySelector('.viewer-footer') || createViewerFooter();
+                     footer.innerHTML = '';
+                     footer.classList.remove('hidden');
+
+                     const saveBtn = document.createElement('button');
+                     saveBtn.id = 'viewerSaveBtn';
+                     saveBtn.className = 'upload-btn';
+                     saveBtn.innerHTML = '<i class="fas fa-save"></i> SAVE CHANGES';
+                     saveBtn.onclick = async () => {
+                         saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> SAVING';
+                         try {
+                             const res = await fetchWithAuth('/api/save', {
+                                 method: 'POST',
+                                 headers: { 'Content-Type': 'application/json' },
+                                 body: JSON.stringify({ path: filePath, content: textarea.value })
+                             });
+                             if (res.ok) showToast('FILE SAVED SUCCESSFULLY');
+                             else showToast('SAVE FAILED: ' + (await res.json()).error, 'error');
+                         } catch (e) {
+                             showToast('CONNECTION ERROR', 'error');
+                         } finally {
+                             saveBtn.innerHTML = '<i class="fas fa-save"></i> SAVE CHANGES';
+                         }
+                     };
+                     footer.appendChild(saveBtn);
+                 }
+
             } else {
                 viewerBody.innerHTML = '';
+                // Hide footer for non-text
+                const footer = document.querySelector('.viewer-footer');
+                if (footer) footer.classList.add('hidden');
+
                 let previewEl = null;
                 if (previewType === 'image') {
                     previewEl = document.createElement('img');
@@ -672,6 +785,15 @@ document.addEventListener('DOMContentLoaded', async () => {
     function closeViewer() {
         viewerOverlay.classList.add('hidden');
         viewerBody.innerHTML = '';
+        const footer = document.querySelector('.viewer-footer');
+        if (footer) footer.classList.add('hidden');
+    }
+
+    function createViewerFooter() {
+        const footer = document.createElement('div');
+        footer.className = 'viewer-footer hidden';
+        document.querySelector('.viewer-window').appendChild(footer);
+        return footer;
     }
 
     function updateBreadcrumb(path) {
@@ -840,7 +962,8 @@ document.addEventListener('DOMContentLoaded', async () => {
             { icon: 'fa-download', label: 'DOWNLOAD', action: () => downloadFile(file.name, file.path), condition: !file.isDirectory },
             { icon: 'fa-link', label: 'COPY LINK', action: () => copyDirectLink(file.name, file.path), condition: !file.isDirectory },
             { separator: true },
-            { icon: 'fa-trash', label: 'DELETE', action: () => { selectedFiles.add(file.name); deleteSelectedFiles(); }, danger: true }
+            { icon: 'fa-edit', label: 'RENAME', action: () => renameFile(file.name), condition: userRole === 'admin' },
+            { icon: 'fa-trash', label: 'DELETE', action: () => { selectedFiles.add(file.name); deleteSelectedFiles(); }, danger: true, condition: userRole === 'admin' }
         ];
 
         actions.forEach(item => {
